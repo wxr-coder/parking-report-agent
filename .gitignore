@@ -209,6 +209,13 @@ tempCodeRunnerFile.py
 # PyPI configuration file
 .pypirc
 
+# Application runtime state
+storage/*
+!storage/.gitkeep
+
+# Generated local chart copy; sample_report.docx is intentionally tracked.
+sample/payment_methods.png
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
