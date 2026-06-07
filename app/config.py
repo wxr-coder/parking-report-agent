@@ -1,7 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,8 +12,19 @@ class Settings(BaseSettings):
     openai_base_url: str = Field(default="https://ark.cn-beijing.volces.com/api/v3", alias="OPENAI_BASE_URL")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     openai_model: str = Field(default="deepseek-v4-flash", alias="OPENAI_MODEL")
-    worker_count: int = Field(default=1, alias="WORKER_COUNT")
-    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    submit_api_key: str | None = Field(default=None, alias="SUBMIT_API_KEY")
+    worker_count: int = Field(default=1, ge=1, le=8, alias="WORKER_COUNT")
+    max_pending_jobs: int = Field(default=8, ge=1, le=128, alias="MAX_PENDING_JOBS")
+    max_upload_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        ge=1024,
+        le=100 * 1024 * 1024,
+        alias="MAX_UPLOAD_BYTES",
+    )
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        default="INFO",
+        alias="LOG_LEVEL",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -24,6 +36,11 @@ class Settings(BaseSettings):
     @property
     def jobs_dir(self) -> Path:
         return self.storage_dir / "jobs"
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def normalize_log_level(cls, value: str) -> str:
+        return value.upper()
 
 
 @lru_cache

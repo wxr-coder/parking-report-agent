@@ -178,6 +178,10 @@ def money_str(value: Decimal) -> str:
     return f"{rounded:.2f}"
 
 
+def required_csv_columns() -> tuple[str, ...]:
+    return (*MONEY_COLUMNS, "支付方式", "支付渠道", "收费时间", "进车时间")
+
+
 def _duration_bucket(hours: Decimal) -> str:
     if hours < 1:
         return "<1h"
@@ -201,6 +205,6 @@ def _range_text(start: datetime | None, end: datetime | None) -> str | None:
 def _validate_headers(fieldnames: list[str] | None) -> None:
     if not fieldnames:
         raise ValueError("CSV is empty or missing headers")
-    missing = [column for column in (*MONEY_COLUMNS, "支付方式", "支付渠道", "收费时间", "进车时间") if column not in fieldnames]
+    missing = [column for column in required_csv_columns() if column not in fieldnames]
     if missing:
         raise ValueError(f"CSV missing required columns: {', '.join(missing)}")

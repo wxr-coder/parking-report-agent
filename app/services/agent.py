@@ -37,9 +37,10 @@ def build_narrative(
         {
             "role": "system",
             "content": (
-                "You write concise Chinese management report sections for a parking operation. "
+                "You write concise qualitative Chinese management report bullets for a parking operation. "
                 "Use only the JSON facts provided by the user. Do not invent or recalculate hard metrics. "
-                "Return strict JSON with keys: payment_and_channel, parking_duration, observations, recommendations. "
+                "Do not include numbers, percentages, dates, amounts, or counts in your text. "
+                "Return strict JSON with keys: observations and recommendations. "
                 "observations must contain 2-3 strings; recommendations must contain 2-4 strings."
             ),
         },
@@ -75,7 +76,7 @@ def build_narrative(
         data = response.json()
         content = data["choices"][0]["message"]["content"]
         parsed = json.loads(content)
-        sections = _parse_sections(parsed)
+        sections = _parse_qualitative_sections(parsed, fallback)
         logger.info(
             "llm_call",
             extra={
@@ -85,8 +86,6 @@ def build_narrative(
                 "latency_ms": latency_ms,
                 "success": True,
                 "response_format_retry": response_format_retry,
-                "messages": messages,
-                "response": content,
             },
         )
         return sections
@@ -101,8 +100,7 @@ def build_narrative(
                 "latency_ms": latency_ms,
                 "success": False,
                 "response_format_retry": response_format_retry,
-                "messages": messages,
-                "error": str(exc),
+                "error_type": type(exc).__name__,
             },
         )
         return fallback
@@ -162,23 +160,15 @@ def fallback_narrative(metrics: MetricsResult) -> NarrativeSections:
     )
 
 
-def _parse_sections(payload: dict[str, Any]) -> NarrativeSections:
+def _parse_qualitative_sections(payload: dict[str, Any], fallback: NarrativeSections) -> NarrativeSections:
     observations = _string_list(payload.get("observations"), min_count=2, max_count=3)
     recommendations = _string_list(payload.get("recommendations"), min_count=2, max_count=4)
-    payment = _required_string(payload.get("payment_and_channel"), "payment_and_channel")
-    duration = _required_string(payload.get("parking_duration"), "parking_duration")
     return NarrativeSections(
-        payment_and_channel=payment,
-        parking_duration=duration,
+        payment_and_channel=fallback.payment_and_channel,
+        parking_duration=fallback.parking_duration,
         observations=observations,
         recommendations=recommendations,
     )
-
-
-def _required_string(value: Any, key: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"LLM response missing non-empty {key}")
-    return value.strip()
 
 
 def _string_list(value: Any, *, min_count: int, max_count: int) -> list[str]:
@@ -187,4 +177,11 @@ def _string_list(value: Any, *, min_count: int, max_count: int) -> list[str]:
     items = [item.strip() for item in value if isinstance(item, str) and item.strip()]
     if not min_count <= len(items) <= max_count:
         raise ValueError("LLM response list field has invalid item count")
+    for item in items:
+        _reject_hard_metric_text(item)
     return items
+
+
+def _reject_hard_metric_text(value: str) -> None:
+    if any(char.isdigit() for char in value):
+        raise ValueError("LLM response contains numeric text")
