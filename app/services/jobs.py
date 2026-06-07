@@ -2,15 +2,15 @@ import logging
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Lock
+from threading import Event
 from uuid import uuid4
 from zipfile import BadZipFile, ZipFile
 
 from fastapi import UploadFile
 
 from app.config import Settings
-from app.db import JobRepository
-from app.models import JobRecord, JobStatus
+from app.db import JobRepository, QueueCapacityError
+from app.models import JobRecord, JobStage, JobStatus
 from app.services.agent import build_narrative
 from app.services.charts import create_payment_method_chart
 from app.services.metrics import compute_metrics
@@ -36,8 +36,9 @@ class JobService:
         self.settings = settings
         self.repository = repository
         self.executor = ThreadPoolExecutor(max_workers=settings.worker_count)
-        self._pending_lock = Lock()
-        self._pending_jobs = 0
+        self._stop_event = Event()
+        self._wake_event = Event()
+        self._started = False
 
     def submit(
         self,
@@ -46,7 +47,6 @@ class JobService:
         data_file: UploadFile,
         instructions: str | None,
     ) -> JobRecord:
-        self._reserve_capacity()
         job_id = uuid4().hex
         job_dir = self.job_dir(job_id)
         try:
@@ -65,6 +65,8 @@ class JobService:
                 template_filename=template_name,
                 data_filename=data_name,
                 instructions=instructions,
+                max_attempts=self.settings.job_max_attempts,
+                max_active_jobs=self.settings.max_pending_jobs,
             )
             logger.info(
                 "job_submitted",
@@ -77,22 +79,52 @@ class JobService:
                     "status": record.status.value,
                 },
             )
-            self.executor.submit(self.run_generation, job_id)
+            self._wake_event.set()
             return record
+        except QueueCapacityError as exc:
+            if job_dir.exists():
+                shutil.rmtree(job_dir, ignore_errors=True)
+            raise QueueFullError("job queue is full") from exc
         except Exception:
-            self._release_capacity()
             if job_dir.exists():
                 shutil.rmtree(job_dir, ignore_errors=True)
             raise
 
+    def start(self) -> None:
+        if self._started:
+            return
+        self._started = True
+        recovered = self.repository.recover_stale_running(
+            lock_timeout_seconds=self.settings.job_lock_timeout_seconds
+        )
+        if recovered:
+            logger.info(
+                "jobs_recovered",
+                extra={"event": "jobs_recovered", "count": recovered},
+            )
+        for index in range(self.settings.worker_count):
+            self.executor.submit(self._worker_loop, f"worker-{index + 1}")
+
+    def shutdown(self) -> None:
+        self._stop_event.set()
+        self._wake_event.set()
+        self.executor.shutdown(wait=False, cancel_futures=True)
+
+    def process_next_job(self, worker_id: str = "manual-worker") -> JobRecord | None:
+        record = self.repository.claim_next(worker_id)
+        if record is None:
+            return None
+        self.run_generation(record.job_id)
+        return self.repository.get_required(record.job_id)
+
     def run_generation(self, job_id: str) -> None:
         try:
-            self.repository.update_status(job_id, JobStatus.running, error=None)
             logger.info("job_started", extra={"event": "job_started", "job_id": job_id})
             output_path = generate_report_for_job(job_id, self.settings, self.repository)
             self.repository.update_status(
                 job_id,
                 JobStatus.completed,
+                stage=JobStage.completed,
                 result_path=str(output_path),
                 error=None,
             )
@@ -101,30 +133,35 @@ class JobService:
                 extra={"event": "job_completed", "job_id": job_id, "result_path": str(output_path)},
             )
         except Exception as exc:
-            self.repository.update_status(
+            record = self.repository.retry_or_fail(
                 job_id,
-                JobStatus.failed,
-                error=PUBLIC_GENERATION_ERROR,
+                public_error=PUBLIC_GENERATION_ERROR,
+                retry_base_seconds=self.settings.job_retry_base_seconds,
             )
             logger.exception(
                 "job_failed",
-                extra={"event": "job_failed", "job_id": job_id, "error_type": type(exc).__name__},
+                extra={
+                    "event": "job_failed",
+                    "job_id": job_id,
+                    "error_type": type(exc).__name__,
+                    "attempts": record.attempts,
+                    "max_attempts": record.max_attempts,
+                    "retrying": record.status == JobStatus.queued,
+                    "next_run_at": record.next_run_at.isoformat() if record.next_run_at else None,
+                },
             )
-        finally:
-            self._release_capacity()
 
     def job_dir(self, job_id: str) -> Path:
         return self.settings.jobs_dir / job_id
 
-    def _reserve_capacity(self) -> None:
-        with self._pending_lock:
-            if self._pending_jobs >= self.settings.max_pending_jobs:
-                raise QueueFullError("job queue is full")
-            self._pending_jobs += 1
-
-    def _release_capacity(self) -> None:
-        with self._pending_lock:
-            self._pending_jobs = max(0, self._pending_jobs - 1)
+    def _worker_loop(self, worker_id: str) -> None:
+        logger.info("queue_worker_started", extra={"event": "queue_worker_started", "worker_id": worker_id})
+        while not self._stop_event.is_set():
+            record = self.process_next_job(worker_id)
+            if record is None:
+                self._wake_event.wait(self.settings.job_poll_interval_seconds)
+                self._wake_event.clear()
+        logger.info("queue_worker_stopped", extra={"event": "queue_worker_stopped", "worker_id": worker_id})
 
 
 def generate_report_for_job(job_id: str, settings: Settings, repository: JobRepository) -> Path:
@@ -135,14 +172,18 @@ def generate_report_for_job(job_id: str, settings: Settings, repository: JobRepo
     chart_path = job_dir / "payment_methods.png"
     output_path = job_dir / "generated_report.docx"
 
+    repository.update_stage(job_id, JobStage.metrics)
     metrics = compute_metrics(data_path)
+    repository.update_stage(job_id, JobStage.chart)
     create_payment_method_chart(metrics, chart_path)
+    repository.update_stage(job_id, JobStage.narrative)
     narrative = build_narrative(
         metrics,
         settings,
         job_id=job_id,
         instructions=record.instructions,
     )
+    repository.update_stage(job_id, JobStage.report)
     return render_report(
         template_path=template_path,
         output_path=output_path,

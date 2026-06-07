@@ -30,8 +30,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.settings = app_settings
         app.state.repository = repository
         app.state.job_service = job_service
+        job_service.start()
         yield
-        job_service.executor.shutdown(wait=False, cancel_futures=True)
+        job_service.shutdown()
 
     app = FastAPI(title="Parking Report Agent", version="0.1.0", lifespan=lifespan)
     app.state.settings = app_settings
@@ -97,6 +98,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JobStatusResponse(
             job_id=record.job_id,
             status=record.status,
+            stage=record.stage,
+            attempts=record.attempts,
+            max_attempts=record.max_attempts,
+            next_run_at=record.next_run_at,
             created_at=record.created_at,
             updated_at=record.updated_at,
             error=record.error,
