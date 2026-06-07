@@ -61,13 +61,15 @@ def build_narrative(
         "response_format": {"type": "json_object"},
     }
     started = time.perf_counter()
+    response_format_retry = False
     try:
         with httpx.Client(timeout=30) as client:
-            response = client.post(
-                f"{settings.openai_base_url.rstrip('/')}/chat/completions",
-                headers={"Authorization": f"Bearer {settings.openai_api_key}"},
-                json=payload,
-            )
+            response = _post_chat_completion(client, settings, payload)
+            if _is_unsupported_response_format(response):
+                response_format_retry = True
+                retry_payload = dict(payload)
+                retry_payload.pop("response_format", None)
+                response = _post_chat_completion(client, settings, retry_payload)
             response.raise_for_status()
         latency_ms = round((time.perf_counter() - started) * 1000)
         data = response.json()
@@ -82,6 +84,7 @@ def build_narrative(
                 "model": settings.openai_model,
                 "latency_ms": latency_ms,
                 "success": True,
+                "response_format_retry": response_format_retry,
                 "messages": messages,
                 "response": content,
             },
@@ -97,11 +100,36 @@ def build_narrative(
                 "model": settings.openai_model,
                 "latency_ms": latency_ms,
                 "success": False,
+                "response_format_retry": response_format_retry,
                 "messages": messages,
                 "error": str(exc),
             },
         )
         return fallback
+
+
+def _post_chat_completion(
+    client: httpx.Client,
+    settings: Settings,
+    payload: dict[str, Any],
+) -> httpx.Response:
+    return client.post(
+        f"{settings.openai_base_url.rstrip('/')}/chat/completions",
+        headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+        json=payload,
+    )
+
+
+def _is_unsupported_response_format(response: httpx.Response) -> bool:
+    if response.status_code != 400:
+        return False
+    try:
+        error = response.json().get("error", {})
+    except ValueError:
+        return False
+    message = str(error.get("message", ""))
+    param = str(error.get("param", ""))
+    return param == "response_format.type" and "not supported" in message
 
 
 def fallback_narrative(metrics: MetricsResult) -> NarrativeSections:
