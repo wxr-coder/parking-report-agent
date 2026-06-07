@@ -1,11 +1,22 @@
 import asyncio
 import json
+from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
+from fastapi import UploadFile
+
 from app.config import Settings
+from app.db import JobRepository
 from app.main import create_app
 from app.models import JobStatus
+from app.services import jobs
+from app.services.jobs import (
+    PUBLIC_GENERATION_ERROR,
+    JobService,
+    QueueFullError,
+    UploadValidationError,
+)
 
 
 def test_index_builds_formdata_before_disabling_file_inputs() -> None:
@@ -80,6 +91,160 @@ def test_submit_status_download_with_generation_mock(monkeypatch, tmp_path: Path
         download_response.headers["content-type"]
         == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
+
+
+def test_status_does_not_expose_traceback_for_failed_job(monkeypatch, tmp_path: Path) -> None:
+    settings = Settings(
+        storage_dir=tmp_path / "storage",
+        database_path=tmp_path / "jobs.sqlite3",
+        openai_api_key=None,
+    )
+    repository = JobRepository(settings.database_path)
+    repository.init()
+    service = JobService(settings, repository)
+    record = repository.create(
+        job_id="failed-job",
+        template_filename="template.docx",
+        data_filename="data.csv",
+        instructions=None,
+    )
+
+    def fail_generation(job_id, settings, repository):
+        raise RuntimeError("sensitive /srv/app/path")
+
+    monkeypatch.setattr(jobs, "generate_report_for_job", fail_generation)
+    service.run_generation(record.job_id)
+    app = create_app(settings)
+
+    response = _request(app, "GET", "/jobs/failed-job")
+    payload = json.loads(response.body)
+
+    assert response.status_code == 200
+    assert payload["status"] == "failed"
+    assert payload["error"] == PUBLIC_GENERATION_ERROR
+    assert "Traceback" not in payload["error"]
+    assert "/srv/app/path" not in payload["error"]
+
+
+def test_submit_rejects_invalid_docx_content(tmp_path: Path) -> None:
+    settings = Settings(
+        storage_dir=tmp_path / "storage",
+        database_path=tmp_path / "jobs.sqlite3",
+        openai_api_key=None,
+    )
+    app = create_app(settings)
+    post_body, content_type = _multipart_body(
+        fields={},
+        files={
+            "template_file": (
+                "template.docx",
+                b"not a docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            "data_file": ("data.csv", Path("sample/data.csv").read_bytes(), "text/csv"),
+        },
+    )
+
+    response = _request(app, "POST", "/jobs", body=post_body, headers={"content-type": content_type})
+    payload = json.loads(response.body)
+
+    assert response.status_code == 400
+    assert payload["detail"] == "template_file must be a valid .docx archive"
+
+
+def test_submit_requires_api_key_when_configured(tmp_path: Path) -> None:
+    settings = Settings(
+        storage_dir=tmp_path / "storage",
+        database_path=tmp_path / "jobs.sqlite3",
+        openai_api_key=None,
+        submit_api_key="secret",
+    )
+    app = create_app(settings)
+    post_body, content_type = _multipart_body(
+        fields={},
+        files={
+            "template_file": (
+                "template.docx",
+                Path("sample/停车明细分析报告_模板.docx").read_bytes(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            "data_file": ("data.csv", Path("sample/data.csv").read_bytes(), "text/csv"),
+        },
+    )
+
+    response = _request(app, "POST", "/jobs", body=post_body, headers={"content-type": content_type})
+    payload = json.loads(response.body)
+
+    assert response.status_code == 401
+    assert payload["detail"] == "invalid API key"
+
+
+def test_job_service_rejects_oversized_upload(tmp_path: Path) -> None:
+    settings = Settings(
+        storage_dir=tmp_path / "storage",
+        database_path=tmp_path / "jobs.sqlite3",
+        openai_api_key=None,
+        max_upload_bytes=1024,
+    )
+    repository = JobRepository(settings.database_path)
+    repository.init()
+    service = JobService(settings, repository)
+
+    try:
+        service.submit(
+            template_file=UploadFile(file=BytesIO(b"x" * 2048), filename="template.docx"),
+            data_file=UploadFile(
+                file=BytesIO(Path("sample/data.csv").read_bytes()),
+                filename="data.csv",
+            ),
+            instructions=None,
+        )
+    except UploadValidationError as exc:
+        assert "exceeds the configured size limit" in str(exc)
+    else:
+        raise AssertionError("expected oversized upload to be rejected")
+
+
+def test_job_service_rejects_when_queue_is_full(monkeypatch, tmp_path: Path) -> None:
+    settings = Settings(
+        storage_dir=tmp_path / "storage",
+        database_path=tmp_path / "jobs.sqlite3",
+        openai_api_key=None,
+        max_pending_jobs=1,
+    )
+    repository = JobRepository(settings.database_path)
+    repository.init()
+    service = JobService(settings, repository)
+    monkeypatch.setattr(service.executor, "submit", lambda *args, **kwargs: None)
+
+    service.submit(
+        template_file=UploadFile(
+            file=BytesIO(Path("sample/停车明细分析报告_模板.docx").read_bytes()),
+            filename="template.docx",
+        ),
+        data_file=UploadFile(
+            file=BytesIO(Path("sample/data.csv").read_bytes()),
+            filename="data.csv",
+        ),
+        instructions=None,
+    )
+
+    try:
+        service.submit(
+            template_file=UploadFile(
+                file=BytesIO(Path("sample/停车明细分析报告_模板.docx").read_bytes()),
+                filename="template.docx",
+            ),
+            data_file=UploadFile(
+                file=BytesIO(Path("sample/data.csv").read_bytes()),
+                filename="data.csv",
+            ),
+            instructions=None,
+        )
+    except QueueFullError:
+        pass
+    else:
+        raise AssertionError("expected queue full rejection")
 
 
 class AsgiResponse:

@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+from secrets import compare_digest
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -9,7 +10,7 @@ from app.config import Settings, get_settings
 from app.db import JobRepository
 from app.logging_config import configure_logging
 from app.models import JobStatus, JobStatusResponse, JobSubmitted
-from app.services.jobs import JobService
+from app.services.jobs import JobService, QueueFullError, UploadValidationError
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -51,6 +52,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/jobs", response_model=JobSubmitted)
     def submit_job(
+        request: Request,
         template_file: UploadFile = File(...),
         data_file: UploadFile = File(...),
         instructions: str | None = Form(default=None),
@@ -60,11 +62,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="template_file must be a .docx file")
         if not (data_file.filename or "").lower().endswith(".csv"):
             raise HTTPException(status_code=400, detail="data_file must be a .csv file")
-        record = service.submit(
-            template_file=template_file,
-            data_file=data_file,
-            instructions=instructions,
-        )
+        if app_settings.submit_api_key and not compare_digest(
+            request.headers.get("x-api-key", ""),
+            app_settings.submit_api_key,
+        ):
+            raise HTTPException(status_code=401, detail="invalid API key")
+        content_length = request.headers.get("content-length")
+        if (
+            content_length
+            and content_length.isdecimal()
+            and int(content_length) > app_settings.max_upload_bytes * 2
+        ):
+            raise HTTPException(status_code=413, detail="upload request is too large")
+        try:
+            record = service.submit(
+                template_file=template_file,
+                data_file=data_file,
+                instructions=instructions,
+            )
+        except QueueFullError as exc:
+            raise HTTPException(status_code=429, detail="job queue is full; try again later") from exc
+        except UploadValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return JobSubmitted(job_id=record.job_id, status=record.status)
 
     @app.get("/jobs/{job_id}", response_model=JobStatusResponse)

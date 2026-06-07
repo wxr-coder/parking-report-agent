@@ -1,9 +1,10 @@
 import logging
 import shutil
-import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Lock
 from uuid import uuid4
+from zipfile import BadZipFile, ZipFile
 
 from fastapi import UploadFile
 
@@ -19,11 +20,24 @@ from app.services.report import render_report
 logger = logging.getLogger(__name__)
 
 
+PUBLIC_GENERATION_ERROR = "Report generation failed. Check server logs with the job_id for details."
+
+
+class QueueFullError(RuntimeError):
+    pass
+
+
+class UploadValidationError(ValueError):
+    pass
+
+
 class JobService:
     def __init__(self, settings: Settings, repository: JobRepository) -> None:
         self.settings = settings
         self.repository = repository
         self.executor = ThreadPoolExecutor(max_workers=settings.worker_count)
+        self._pending_lock = Lock()
+        self._pending_jobs = 0
 
     def submit(
         self,
@@ -32,35 +46,44 @@ class JobService:
         data_file: UploadFile,
         instructions: str | None,
     ) -> JobRecord:
+        self._reserve_capacity()
         job_id = uuid4().hex
         job_dir = self.job_dir(job_id)
-        job_dir.mkdir(parents=True, exist_ok=False)
-        template_name = _safe_filename(template_file.filename or "template.docx")
-        data_name = _safe_filename(data_file.filename or "data.csv")
-        template_path = job_dir / template_name
-        data_path = job_dir / data_name
-        _save_upload(template_file, template_path)
-        _save_upload(data_file, data_path)
+        try:
+            job_dir.mkdir(parents=True, exist_ok=False)
+            template_name = _safe_filename(template_file.filename or "template.docx")
+            data_name = _safe_filename(data_file.filename or "data.csv")
+            template_path = job_dir / template_name
+            data_path = job_dir / data_name
+            _save_upload(template_file, template_path, max_bytes=self.settings.max_upload_bytes)
+            _save_upload(data_file, data_path, max_bytes=self.settings.max_upload_bytes)
+            _validate_docx(template_path)
+            _validate_csv(data_path)
 
-        record = self.repository.create(
-            job_id=job_id,
-            template_filename=template_name,
-            data_filename=data_name,
-            instructions=instructions,
-        )
-        logger.info(
-            "job_submitted",
-            extra={
-                "event": "job_submitted",
-                "job_id": job_id,
-                "template_filename": template_name,
-                "data_filename": data_name,
-                "instructions": instructions,
-                "status": record.status.value,
-            },
-        )
-        self.executor.submit(self.run_generation, job_id)
-        return record
+            record = self.repository.create(
+                job_id=job_id,
+                template_filename=template_name,
+                data_filename=data_name,
+                instructions=instructions,
+            )
+            logger.info(
+                "job_submitted",
+                extra={
+                    "event": "job_submitted",
+                    "job_id": job_id,
+                    "template_filename": template_name,
+                    "data_filename": data_name,
+                    "instructions_present": bool(instructions),
+                    "status": record.status.value,
+                },
+            )
+            self.executor.submit(self.run_generation, job_id)
+            return record
+        except Exception:
+            self._release_capacity()
+            if job_dir.exists():
+                shutil.rmtree(job_dir, ignore_errors=True)
+            raise
 
     def run_generation(self, job_id: str) -> None:
         try:
@@ -81,12 +104,27 @@ class JobService:
             self.repository.update_status(
                 job_id,
                 JobStatus.failed,
-                error=f"{exc}\n{traceback.format_exc()}",
+                error=PUBLIC_GENERATION_ERROR,
             )
-            logger.exception("job_failed", extra={"event": "job_failed", "job_id": job_id})
+            logger.exception(
+                "job_failed",
+                extra={"event": "job_failed", "job_id": job_id, "error_type": type(exc).__name__},
+            )
+        finally:
+            self._release_capacity()
 
     def job_dir(self, job_id: str) -> Path:
         return self.settings.jobs_dir / job_id
+
+    def _reserve_capacity(self) -> None:
+        with self._pending_lock:
+            if self._pending_jobs >= self.settings.max_pending_jobs:
+                raise QueueFullError("job queue is full")
+            self._pending_jobs += 1
+
+    def _release_capacity(self) -> None:
+        with self._pending_lock:
+            self._pending_jobs = max(0, self._pending_jobs - 1)
 
 
 def generate_report_for_job(job_id: str, settings: Settings, repository: JobRepository) -> Path:
@@ -114,10 +152,43 @@ def generate_report_for_job(job_id: str, settings: Settings, repository: JobRepo
     )
 
 
-def _save_upload(upload: UploadFile, destination: Path) -> None:
+def _save_upload(upload: UploadFile, destination: Path, *, max_bytes: int) -> None:
+    total = 0
     with destination.open("wb") as file:
-        shutil.copyfileobj(upload.file, file)
+        while chunk := upload.file.read(1024 * 1024):
+            total += len(chunk)
+            if total > max_bytes:
+                raise UploadValidationError(
+                    f"{upload.filename or 'upload'} exceeds the configured size limit"
+                )
+            file.write(chunk)
 
 
 def _safe_filename(filename: str) -> str:
     return Path(filename).name.replace("/", "_").replace("\\", "_")
+
+
+def _validate_docx(path: Path) -> None:
+    try:
+        with ZipFile(path) as archive:
+            names = set(archive.namelist())
+    except BadZipFile as exc:
+        raise UploadValidationError("template_file must be a valid .docx archive") from exc
+    if "word/document.xml" not in names:
+        raise UploadValidationError("template_file is missing a Word document body")
+
+
+def _validate_csv(path: Path) -> None:
+    from app.services.metrics import required_csv_columns
+
+    try:
+        import csv
+
+        with path.open("r", encoding="utf-8-sig", newline="") as file:
+            reader = csv.DictReader(file)
+            fieldnames = reader.fieldnames
+    except UnicodeDecodeError as exc:
+        raise UploadValidationError("data_file must be a UTF-8 CSV file") from exc
+    missing = [column for column in required_csv_columns() if column not in (fieldnames or [])]
+    if missing:
+        raise UploadValidationError(f"data_file missing required columns: {', '.join(missing)}")

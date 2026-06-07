@@ -38,11 +38,18 @@ The app loads `.env` via typed settings. `.env` is ignored by git.
 OPENAI_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
 OPENAI_API_KEY=your-key
 OPENAI_MODEL=deepseek-v4-flash
+SUBMIT_API_KEY=optional-submit-key
 STORAGE_DIR=storage
 DATABASE_PATH=storage/jobs.sqlite3
+WORKER_COUNT=1
+MAX_PENDING_JOBS=8
+MAX_UPLOAD_BYTES=10485760
+LOG_LEVEL=INFO
 ```
 
 If `OPENAI_API_KEY` is missing, generation still succeeds with deterministic fallback narrative text. The LLM is never used to compute hard numbers.
+
+If `SUBMIT_API_KEY` is set, `POST /jobs` requires the same value in the `X-API-Key` header.
 
 ## Design Overview
 
@@ -59,7 +66,7 @@ Report generation is split into clear layers:
 - `app/services/agent.py` sends only grounded JSON facts to an OpenAI-compatible chat completion endpoint and validates structured JSON output. It falls back safely offline.
 - `app/services/report.py` fills the supplied `.docx` template with deterministic metrics, narrative sections, and the chart image.
 
-JSON logs are emitted for `job_submitted`, `job_started`, `job_completed`, `job_failed`, `llm_call`, and `llm_call_skipped`/`llm_call_failed`. For this take-home the LLM prompt and response are logged for debuggability; production should redact or sample sensitive payloads.
+JSON logs are emitted for `job_submitted`, `job_started`, `job_completed`, `job_failed`, `llm_call`, and `llm_call_skipped`/`llm_call_failed`. Logs avoid upload contents, user instructions, full LLM prompts, and model responses; use `job_id` to correlate failures with controlled server logs.
 
 ## Sample Report
 
