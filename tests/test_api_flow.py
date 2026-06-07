@@ -8,6 +8,16 @@ from app.main import create_app
 from app.models import JobStatus
 
 
+def test_index_builds_formdata_before_disabling_file_inputs() -> None:
+    html = Path("app/templates/index.html").read_text(encoding="utf-8")
+
+    form_data_index = html.index("const formData = new FormData(form);")
+    disable_inputs_index = html.index("setRunning(true);", form_data_index)
+    fetch_body_index = html.index("body: formData", disable_inputs_index)
+
+    assert form_data_index < disable_inputs_index < fetch_body_index
+
+
 def test_submit_status_download_with_generation_mock(monkeypatch, tmp_path: Path) -> None:
     settings = Settings(
         storage_dir=tmp_path / "storage",

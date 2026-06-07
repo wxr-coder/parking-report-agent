@@ -1,27 +1,1039 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Parking Report Agent</title>
     <style>
-      body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 40px; max-width: 760px; color: #202124; }
-      form { display: grid; gap: 16px; }
-      label { display: grid; gap: 6px; font-weight: 600; }
-      input, textarea, button { font: inherit; }
-      textarea { min-height: 96px; }
-      button { width: fit-content; padding: 8px 14px; cursor: pointer; }
-      code { background: #f1f3f4; padding: 2px 5px; }
+      :root {
+        color-scheme: dark;
+        --bg: #08090d;
+        --panel: #101116;
+        --panel-2: #151720;
+        --line: rgba(255, 255, 255, 0.11);
+        --line-strong: rgba(255, 255, 255, 0.18);
+        --text: #f4f4f5;
+        --muted: #a1a1aa;
+        --muted-2: #71717a;
+        --accent: #f5f5f5;
+        --green: #2fd17c;
+        --amber: #f0b429;
+        --red: #ff6b6b;
+        --blue: #6ea8fe;
+        --shadow: 0 24px 70px rgba(0, 0, 0, 0.44);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        background:
+          radial-gradient(circle at 20% 0%, rgba(110, 168, 254, 0.11), transparent 30rem),
+          linear-gradient(180deg, #0c0d12 0%, var(--bg) 44%, #050609 100%);
+        color: var(--text);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        letter-spacing: 0;
+      }
+
+      button,
+      input,
+      textarea {
+        font: inherit;
+      }
+
+      button {
+        border: 0;
+      }
+
+      .page {
+        width: min(1120px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 40px 0;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 32px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+      }
+
+      .mark {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: linear-gradient(145deg, #1d2029, #0d0e13);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        color: #fff;
+        font-weight: 750;
+      }
+
+      .brand-title {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 650;
+        line-height: 1.2;
+      }
+
+      .brand-subtitle {
+        margin: 2px 0 0;
+        color: var(--muted-2);
+        font-size: 13px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 30px;
+        padding: 0 11px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.035);
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      .pulse-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--green);
+        box-shadow: 0 0 0 4px rgba(47, 209, 124, 0.13);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 0.95fr) minmax(420px, 1.05fr);
+        gap: 28px;
+        align-items: start;
+      }
+
+      .intro {
+        padding: 22px 4px 0 0;
+      }
+
+      .eyebrow {
+        margin: 0 0 14px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      h1 {
+        max-width: 620px;
+        margin: 0;
+        color: #fff;
+        font-size: clamp(38px, 6vw, 68px);
+        line-height: 0.96;
+        letter-spacing: 0;
+      }
+
+      .lede {
+        max-width: 560px;
+        margin: 22px 0 0;
+        color: var(--muted);
+        font-size: 17px;
+        line-height: 1.65;
+      }
+
+      .lifecycle {
+        margin-top: 34px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.035);
+        overflow: hidden;
+      }
+
+      .lifecycle-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .section-title {
+        margin: 0;
+        font-size: 13px;
+        font-weight: 650;
+        color: #e8e8ea;
+      }
+
+      .status-chip {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 4px 9px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .steps {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        padding: 14px;
+        gap: 8px;
+      }
+
+      .step {
+        min-width: 0;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.16);
+      }
+
+      .step-kicker {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted-2);
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .step-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #3f3f46;
+      }
+
+      .step.active .step-dot {
+        background: var(--blue);
+        box-shadow: 0 0 0 4px rgba(110, 168, 254, 0.12);
+      }
+
+      .step.done .step-dot {
+        background: var(--green);
+      }
+
+      .step.failed .step-dot {
+        background: var(--red);
+      }
+
+      .step-title {
+        margin: 8px 0 0;
+        color: #ececef;
+        font-size: 13px;
+        font-weight: 600;
+        overflow-wrap: anywhere;
+      }
+
+      .panel {
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent 120px),
+          var(--panel);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 18px 20px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .panel-header h2 {
+        margin: 0;
+        font-size: 16px;
+        line-height: 1.2;
+      }
+
+      .panel-header p {
+        margin: 4px 0 0;
+        color: var(--muted-2);
+        font-size: 13px;
+      }
+
+      form {
+        display: grid;
+        gap: 16px;
+        padding: 20px;
+      }
+
+      .field {
+        display: grid;
+        gap: 8px;
+      }
+
+      .field-label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        color: #eeeeef;
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .optional {
+        color: var(--muted-2);
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .file-input {
+        position: relative;
+      }
+
+      .file-input input {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+        cursor: pointer;
+      }
+
+      .file-shell {
+        display: grid;
+        grid-template-columns: 40px minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: center;
+        min-height: 76px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.035);
+        transition:
+          border-color 160ms ease,
+          background 160ms ease,
+          transform 160ms ease;
+      }
+
+      .file-input:hover .file-shell,
+      .file-input:focus-within .file-shell {
+        border-color: rgba(255, 255, 255, 0.28);
+        background: rgba(255, 255, 255, 0.055);
+      }
+
+      .file-icon {
+        display: grid;
+        width: 40px;
+        height: 40px;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #0b0c11;
+        color: #fafafa;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .file-name {
+        margin: 0;
+        color: #f5f5f6;
+        font-size: 14px;
+        font-weight: 620;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .file-help {
+        margin: 4px 0 0;
+        color: var(--muted-2);
+        font-size: 12px;
+      }
+
+      .browse {
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        padding: 7px 10px;
+        color: #d8d8dc;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 112px;
+        resize: vertical;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 13px 14px;
+        outline: none;
+        background: rgba(255, 255, 255, 0.035);
+        color: var(--text);
+        line-height: 1.5;
+        transition:
+          border-color 160ms ease,
+          background 160ms ease;
+      }
+
+      textarea:focus {
+        border-color: rgba(255, 255, 255, 0.3);
+        background: rgba(255, 255, 255, 0.055);
+      }
+
+      textarea::placeholder {
+        color: #5f6068;
+      }
+
+      .actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding-top: 4px;
+      }
+
+      .hint {
+        color: var(--muted-2);
+        font-size: 12px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 9px;
+        min-height: 40px;
+        border-radius: 8px;
+        padding: 0 15px;
+        background: #f3f4f6;
+        color: #09090b;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 720;
+        text-decoration: none;
+        transition:
+          opacity 160ms ease,
+          transform 160ms ease,
+          background 160ms ease;
+      }
+
+      .button:hover {
+        background: #fff;
+      }
+
+      .button:active {
+        transform: translateY(1px);
+      }
+
+      .button[disabled] {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      .button.secondary {
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text);
+      }
+
+      .button.secondary:hover {
+        background: rgba(255, 255, 255, 0.09);
+      }
+
+      .button.danger {
+        background: rgba(255, 107, 107, 0.13);
+        color: #ffd1d1;
+        border: 1px solid rgba(255, 107, 107, 0.28);
+      }
+
+      .message {
+        display: none;
+        margin: 0 20px 20px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px 13px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+      }
+
+      .message.show {
+        display: block;
+      }
+
+      .message.error {
+        border-color: rgba(255, 107, 107, 0.32);
+        background: rgba(255, 107, 107, 0.08);
+        color: #ffd1d1;
+      }
+
+      .message.success {
+        border-color: rgba(47, 209, 124, 0.25);
+        background: rgba(47, 209, 124, 0.08);
+        color: #c7f7dc;
+      }
+
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: none;
+        place-items: center;
+        padding: 18px;
+        background: rgba(5, 6, 9, 0.72);
+        backdrop-filter: blur(12px);
+      }
+
+      .modal-backdrop.show {
+        display: grid;
+      }
+
+      .modal {
+        width: min(520px, 100%);
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.085), transparent 120px),
+          var(--panel);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .modal-main {
+        padding: 24px;
+      }
+
+      .progress-head {
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+      }
+
+      .spinner {
+        flex: 0 0 auto;
+        width: 40px;
+        height: 40px;
+        border: 3px solid rgba(255, 255, 255, 0.12);
+        border-top-color: #fff;
+        border-radius: 50%;
+        animation: spin 900ms linear infinite;
+      }
+
+      .spinner.done {
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(47, 209, 124, 0.35);
+        background: rgba(47, 209, 124, 0.13);
+        color: #b7f5d0;
+        animation: none;
+      }
+
+      .spinner.done::before {
+        content: "✓";
+        font-size: 20px;
+        font-weight: 800;
+      }
+
+      .spinner.failed {
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(255, 107, 107, 0.36);
+        background: rgba(255, 107, 107, 0.13);
+        color: #ffd1d1;
+        animation: none;
+      }
+
+      .spinner.failed::before {
+        content: "!";
+        font-size: 20px;
+        font-weight: 800;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .modal-title {
+        margin: 0;
+        color: #fff;
+        font-size: 18px;
+        line-height: 1.25;
+      }
+
+      .modal-status {
+        margin: 7px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.55;
+      }
+
+      .job-meta {
+        display: grid;
+        gap: 8px;
+        margin-top: 20px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.16);
+      }
+
+      .meta-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        color: var(--muted-2);
+        font-size: 12px;
+      }
+
+      .meta-row span:last-child {
+        color: var(--muted);
+        min-width: 0;
+        overflow-wrap: anywhere;
+        text-align: right;
+      }
+
+      .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        padding: 16px 24px;
+        border-top: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .download-link {
+        display: none;
+      }
+
+      .download-link.show {
+        display: inline-flex;
+      }
+
+      @media (max-width: 900px) {
+        .hero {
+          grid-template-columns: 1fr;
+        }
+
+        .intro {
+          padding-top: 4px;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .page {
+          width: min(100% - 24px, 1120px);
+          padding: 22px 0;
+        }
+
+        .topbar,
+        .actions,
+        .modal-actions {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .steps {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .file-shell {
+          grid-template-columns: 36px minmax(0, 1fr);
+        }
+
+        .browse {
+          display: none;
+        }
+
+        .button {
+          width: 100%;
+        }
+      }
     </style>
   </head>
   <body>
-    <h1>Parking Report Agent</h1>
-    <form method="post" action="/jobs" enctype="multipart/form-data">
-      <label>DOCX 模板 <input type="file" name="template_file" accept=".docx" required /></label>
-      <label>CSV 数据 <input type="file" name="data_file" accept=".csv" required /></label>
-      <label>处理指令 <textarea name="instructions"></textarea></label>
-      <button type="submit">Submit</button>
-    </form>
-    <p>提交后调用 <code>GET /jobs/{job_id}</code> 查看状态，完成后调用 <code>GET /jobs/{job_id}/download</code> 下载。</p>
+    <main class="page">
+      <header class="topbar">
+        <div class="brand">
+          <div class="mark" aria-hidden="true">P</div>
+          <div>
+            <p class="brand-title">Parking Report Agent</p>
+            <p class="brand-subtitle">FastAPI report generation workflow</p>
+          </div>
+        </div>
+        <div class="pill"><span class="pulse-dot" aria-hidden="true"></span>API ready</div>
+      </header>
+
+      <section class="hero" aria-labelledby="page-title">
+        <div class="intro">
+          <p class="eyebrow">Interview take-home interface</p>
+          <h1 id="page-title">Generate parking detail reports from template and CSV data.</h1>
+          <p class="lede">
+            Upload the required DOCX template and CSV data, add optional report guidance, then
+            track the job through submission, polling, completion, and download.
+          </p>
+
+          <section class="lifecycle" aria-labelledby="lifecycle-title">
+            <div class="lifecycle-head">
+              <h2 class="section-title" id="lifecycle-title">API lifecycle</h2>
+              <span class="status-chip" id="lifecycleStatus">Idle</span>
+            </div>
+            <div class="steps" id="timeline" aria-label="Job progress timeline">
+              <div class="step" data-step="submit">
+                <div class="step-kicker"><span class="step-dot"></span>POST</div>
+                <p class="step-title">/jobs</p>
+              </div>
+              <div class="step" data-step="queued">
+                <div class="step-kicker"><span class="step-dot"></span>Status</div>
+                <p class="step-title">Queued</p>
+              </div>
+              <div class="step" data-step="running">
+                <div class="step-kicker"><span class="step-dot"></span>GET</div>
+                <p class="step-title">/jobs/{job_id}</p>
+              </div>
+              <div class="step" data-step="completed">
+                <div class="step-kicker"><span class="step-dot"></span>GET</div>
+                <p class="step-title">Download</p>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel" aria-labelledby="form-title">
+          <div class="panel-header">
+            <div>
+              <h2 id="form-title">New report job</h2>
+              <p>Runs against the existing FastAPI endpoints.</p>
+            </div>
+            <span class="status-chip" id="formStatus">Ready</span>
+          </div>
+
+          <form id="jobForm" enctype="multipart/form-data" novalidate>
+            <label class="field">
+              <span class="field-label">DOCX template <span class="optional">required</span></span>
+              <span class="file-input">
+                <input id="templateFile" type="file" name="template_file" accept=".docx" required />
+                <span class="file-shell">
+                  <span class="file-icon" aria-hidden="true">DOCX</span>
+                  <span>
+                    <span class="file-name" id="templateName">Choose a template file</span>
+                    <span class="file-help">Only .docx files are accepted.</span>
+                  </span>
+                  <span class="browse">Browse</span>
+                </span>
+              </span>
+            </label>
+
+            <label class="field">
+              <span class="field-label">CSV data <span class="optional">required</span></span>
+              <span class="file-input">
+                <input id="dataFile" type="file" name="data_file" accept=".csv" required />
+                <span class="file-shell">
+                  <span class="file-icon" aria-hidden="true">CSV</span>
+                  <span>
+                    <span class="file-name" id="dataName">Choose a data file</span>
+                    <span class="file-help">Upload the parking detail export.</span>
+                  </span>
+                  <span class="browse">Browse</span>
+                </span>
+              </span>
+            </label>
+
+            <label class="field">
+              <span class="field-label">Instructions <span class="optional">optional</span></span>
+              <textarea
+                id="instructions"
+                name="instructions"
+                placeholder="Example: emphasize month-over-month utilization changes and call out outlier parking areas."
+              ></textarea>
+            </label>
+
+            <div class="actions">
+              <span class="hint" id="selectedSummary">No files selected.</span>
+              <button class="button" id="submitButton" type="submit">Generate report</button>
+            </div>
+          </form>
+          <p class="message" id="inlineMessage" role="status" aria-live="polite"></p>
+        </section>
+      </section>
+    </main>
+
+    <div class="modal-backdrop" id="modalBackdrop" role="presentation">
+      <section
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modalTitle"
+        aria-describedby="modalStatus"
+      >
+        <div class="modal-main">
+          <div class="progress-head">
+            <div class="spinner" id="modalSpinner" aria-hidden="true"></div>
+            <div>
+              <h2 class="modal-title" id="modalTitle">Generating report</h2>
+              <p class="modal-status" id="modalStatus">Submitting files to POST /jobs...</p>
+            </div>
+          </div>
+          <div class="job-meta" aria-label="Job metadata">
+            <div class="meta-row"><span>Job ID</span><span id="jobIdText">Pending</span></div>
+            <div class="meta-row"><span>Status</span><span id="jobStatusText">Submitting</span></div>
+            <div class="meta-row"><span>Updated</span><span id="jobUpdatedText">Waiting</span></div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="button secondary" id="closeModalButton" type="button">Close</button>
+          <a class="button download-link" id="downloadButton" href="#" download>Download generated report</a>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const form = document.getElementById("jobForm");
+      const templateFile = document.getElementById("templateFile");
+      const dataFile = document.getElementById("dataFile");
+      const templateName = document.getElementById("templateName");
+      const dataName = document.getElementById("dataName");
+      const selectedSummary = document.getElementById("selectedSummary");
+      const submitButton = document.getElementById("submitButton");
+      const inlineMessage = document.getElementById("inlineMessage");
+      const lifecycleStatus = document.getElementById("lifecycleStatus");
+      const formStatus = document.getElementById("formStatus");
+      const modalBackdrop = document.getElementById("modalBackdrop");
+      const modalSpinner = document.getElementById("modalSpinner");
+      const modalTitle = document.getElementById("modalTitle");
+      const modalStatus = document.getElementById("modalStatus");
+      const jobIdText = document.getElementById("jobIdText");
+      const jobStatusText = document.getElementById("jobStatusText");
+      const jobUpdatedText = document.getElementById("jobUpdatedText");
+      const closeModalButton = document.getElementById("closeModalButton");
+      const downloadButton = document.getElementById("downloadButton");
+      const timelineSteps = Array.from(document.querySelectorAll(".step"));
+
+      const state = {
+        running: false,
+        pollTimer: null,
+        currentJobId: null,
+      };
+
+      function fileLabel(input, fallback) {
+        return input.files && input.files.length ? input.files[0].name : fallback;
+      }
+
+      function updateSelectedFiles() {
+        templateName.textContent = fileLabel(templateFile, "Choose a template file");
+        dataName.textContent = fileLabel(dataFile, "Choose a data file");
+
+        const names = [templateFile.files[0]?.name, dataFile.files[0]?.name].filter(Boolean);
+        selectedSummary.textContent = names.length ? names.join(" + ") : "No files selected.";
+      }
+
+      function setMessage(text, type = "") {
+        inlineMessage.textContent = text;
+        inlineMessage.className = `message${text ? " show" : ""}${type ? ` ${type}` : ""}`;
+      }
+
+      function setRunning(isRunning) {
+        state.running = isRunning;
+        submitButton.disabled = isRunning;
+        templateFile.disabled = isRunning;
+        dataFile.disabled = isRunning;
+        closeModalButton.disabled = isRunning;
+        formStatus.textContent = isRunning ? "Running" : "Ready";
+        submitButton.textContent = isRunning ? "Generating..." : "Generate report";
+      }
+
+      function setTimeline(activeStep, failed = false) {
+        const order = ["submit", "queued", "running", "completed"];
+        const activeIndex = order.indexOf(activeStep);
+
+        timelineSteps.forEach((step) => {
+          const index = order.indexOf(step.dataset.step);
+          step.classList.remove("active", "done", "failed");
+          if (failed && step.dataset.step === activeStep) {
+            step.classList.add("failed");
+          } else if (index < activeIndex || activeStep === "completed") {
+            step.classList.add("done");
+          } else if (index === activeIndex) {
+            step.classList.add("active");
+          }
+        });
+
+        lifecycleStatus.textContent = failed
+          ? "Failed"
+          : activeStep === "completed"
+            ? "Completed"
+            : activeStep === "running"
+              ? "Polling"
+              : activeStep === "queued"
+                ? "Queued"
+                : activeStep === "submit"
+                  ? "Submitting"
+                  : "Idle";
+      }
+
+      function showModal() {
+        modalBackdrop.classList.add("show");
+      }
+
+      function resetModal() {
+        modalSpinner.className = "spinner";
+        modalTitle.textContent = "Generating report";
+        modalStatus.textContent = "Submitting files to POST /jobs...";
+        jobIdText.textContent = "Pending";
+        jobStatusText.textContent = "Submitting";
+        jobUpdatedText.textContent = "Waiting";
+        downloadButton.classList.remove("show");
+        downloadButton.removeAttribute("href");
+      }
+
+      function formatDate(value) {
+        if (!value) return "Waiting";
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+      }
+
+      async function readApiError(response) {
+        try {
+          const payload = await response.json();
+          if (typeof payload.detail === "string") return payload.detail;
+          return JSON.stringify(payload.detail || payload);
+        } catch {
+          return `${response.status} ${response.statusText}`.trim();
+        }
+      }
+
+      function validateFiles() {
+        const template = templateFile.files[0];
+        const data = dataFile.files[0];
+
+        if (!template) return "Select a DOCX template before submitting.";
+        if (!template.name.toLowerCase().endsWith(".docx")) return "Template must be a .docx file.";
+        if (!data) return "Select a CSV data file before submitting.";
+        if (!data.name.toLowerCase().endsWith(".csv")) return "Data file must be a .csv file.";
+        return "";
+      }
+
+      async function pollJob(jobId) {
+        try {
+          const response = await fetch(`/jobs/${encodeURIComponent(jobId)}`);
+          if (!response.ok) throw new Error(await readApiError(response));
+
+          const payload = await response.json();
+          const status = payload.status;
+          jobStatusText.textContent = status;
+          jobUpdatedText.textContent = formatDate(payload.updated_at);
+
+          if (status === "queued") {
+            setTimeline("queued");
+            modalStatus.textContent = "Job accepted. Waiting for the worker to start...";
+            state.pollTimer = window.setTimeout(() => pollJob(jobId), 1100);
+            return;
+          }
+
+          if (status === "running") {
+            setTimeline("running");
+            modalStatus.textContent = "Worker is generating the report. Polling GET /jobs/{job_id}...";
+            state.pollTimer = window.setTimeout(() => pollJob(jobId), 1400);
+            return;
+          }
+
+          if (status === "completed") {
+            setTimeline("completed");
+            modalSpinner.className = "spinner done";
+            modalTitle.textContent = "Report ready";
+            modalStatus.textContent = "Generation completed. Download the generated DOCX report.";
+            downloadButton.href = payload.download_url || `/jobs/${encodeURIComponent(jobId)}/download`;
+            downloadButton.classList.add("show");
+            setMessage("Report generation completed.", "success");
+            setRunning(false);
+            return;
+          }
+
+          if (status === "failed") {
+            throw new Error(payload.error || "The job failed while generating the report.");
+          }
+
+          throw new Error(`Unexpected job status: ${status}`);
+        } catch (error) {
+          setTimeline("running", true);
+          modalSpinner.className = "spinner failed";
+          modalTitle.textContent = "Generation failed";
+          modalStatus.textContent = error.message || "Unable to check job status.";
+          setMessage(error.message || "Unable to check job status.", "error");
+          setRunning(false);
+        }
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (state.running) return;
+
+        const validationError = validateFiles();
+        if (validationError) {
+          setMessage(validationError, "error");
+          return;
+        }
+
+        window.clearTimeout(state.pollTimer);
+        const formData = new FormData(form);
+        setMessage("");
+        resetModal();
+        setTimeline("submit");
+        setRunning(true);
+        showModal();
+
+        try {
+          const response = await fetch("/jobs", {
+            method: "POST",
+            body: formData,
+          });
+          if (!response.ok) throw new Error(await readApiError(response));
+
+          const payload = await response.json();
+          state.currentJobId = payload.job_id;
+          jobIdText.textContent = payload.job_id;
+          jobStatusText.textContent = payload.status;
+          setTimeline(payload.status === "running" ? "running" : "queued");
+          modalStatus.textContent = "Job submitted. Polling status endpoint...";
+          await pollJob(payload.job_id);
+        } catch (error) {
+          setTimeline("submit", true);
+          modalSpinner.className = "spinner failed";
+          modalTitle.textContent = "Submission failed";
+          modalStatus.textContent = error.message || "Could not submit the job.";
+          setMessage(error.message || "Could not submit the job.", "error");
+          setRunning(false);
+        }
+      });
+
+      closeModalButton.addEventListener("click", () => {
+        if (!state.running) modalBackdrop.classList.remove("show");
+      });
+
+      modalBackdrop.addEventListener("click", (event) => {
+        if (event.target === modalBackdrop && !state.running) {
+          modalBackdrop.classList.remove("show");
+        }
+      });
+
+      templateFile.addEventListener("change", updateSelectedFiles);
+      dataFile.addEventListener("change", updateSelectedFiles);
+      setTimeline("");
+      updateSelectedFiles();
+    </script>
   </body>
 </html>
