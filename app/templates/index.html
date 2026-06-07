@@ -989,6 +989,7 @@
         }
 
         window.clearTimeout(state.pollTimer);
+        const formData = new FormData(form);
         setMessage("");
         resetModal();
         setTimeline("submit");
@@ -998,7 +999,7 @@
         try {
           const response = await fetch("/jobs", {
             method: "POST",
-            body: new FormData(form),
+            body: formData,
           });
           if (!response.ok) throw new Error(await readApiError(response));
 
