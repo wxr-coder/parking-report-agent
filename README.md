@@ -43,6 +43,10 @@ STORAGE_DIR=storage
 DATABASE_PATH=storage/jobs.sqlite3
 WORKER_COUNT=1
 MAX_PENDING_JOBS=8
+JOB_MAX_ATTEMPTS=3
+JOB_RETRY_BASE_SECONDS=5
+JOB_POLL_INTERVAL_SECONDS=1.0
+JOB_LOCK_TIMEOUT_SECONDS=300
 MAX_UPLOAD_BYTES=10485760
 LOG_LEVEL=INFO
 ```
@@ -55,8 +59,9 @@ If `SUBMIT_API_KEY` is set, `POST /jobs` requires the same value in the `X-API-K
 
 The lifecycle is intentionally small and durable:
 
-- `POST /jobs` saves uploads into `storage/jobs/{job_id}/`, inserts a SQLite row, submits a background worker task, and immediately returns `{job_id, status}`.
-- `GET /jobs/{job_id}` reads persisted state: `queued`, `running`, `completed`, or `failed`.
+- `POST /jobs` saves uploads into `storage/jobs/{job_id}/`, inserts a queued SQLite row, wakes the worker pool, and immediately returns `{job_id, status}`.
+- Workers atomically claim queued rows from SQLite, mark them `running`, persist stage transitions, and retry failed jobs with exponential backoff until `JOB_MAX_ATTEMPTS`.
+- `GET /jobs/{job_id}` reads persisted state: `queued`, `running`, `completed`, or `failed`, plus the current stage and retry counters.
 - `GET /jobs/{job_id}/download` returns the generated Word file only after completion.
 
 Report generation is split into clear layers:

@@ -9,7 +9,7 @@ from fastapi import UploadFile
 from app.config import Settings
 from app.db import JobRepository
 from app.main import create_app
-from app.models import JobStatus
+from app.models import JobStage, JobStatus
 from app.services import jobs
 from app.services.jobs import (
     PUBLIC_GENERATION_ERROR,
@@ -51,6 +51,7 @@ def test_submit_status_download_with_generation_mock(monkeypatch, tmp_path: Path
         self.repository.update_status(
             job_id,
             JobStatus.completed,
+            stage=JobStage.completed,
             result_path=str(output_path),
             error=None,
         )
@@ -82,6 +83,9 @@ def test_submit_status_download_with_generation_mock(monkeypatch, tmp_path: Path
     status_payload = json.loads(status_response.body)
 
     assert status_payload["status"] == "completed"
+    assert status_payload["stage"] == "completed"
+    assert status_payload["attempts"] == 0
+    assert status_payload["max_attempts"] == 3
     assert status_payload["download_url"] == f"/jobs/{job_id}/download"
 
     download_response = _request(app, "GET", f"/jobs/{job_id}/download")
@@ -98,6 +102,7 @@ def test_status_does_not_expose_traceback_for_failed_job(monkeypatch, tmp_path: 
         storage_dir=tmp_path / "storage",
         database_path=tmp_path / "jobs.sqlite3",
         openai_api_key=None,
+        job_max_attempts=1,
     )
     repository = JobRepository(settings.database_path)
     repository.init()
@@ -107,13 +112,14 @@ def test_status_does_not_expose_traceback_for_failed_job(monkeypatch, tmp_path: 
         template_filename="template.docx",
         data_filename="data.csv",
         instructions=None,
+        max_attempts=settings.job_max_attempts,
     )
 
     def fail_generation(job_id, settings, repository):
         raise RuntimeError("sensitive /srv/app/path")
 
     monkeypatch.setattr(jobs, "generate_report_for_job", fail_generation)
-    service.run_generation(record.job_id)
+    service.process_next_job()
     app = create_app(settings)
 
     response = _request(app, "GET", "/jobs/failed-job")
@@ -122,8 +128,46 @@ def test_status_does_not_expose_traceback_for_failed_job(monkeypatch, tmp_path: 
     assert response.status_code == 200
     assert payload["status"] == "failed"
     assert payload["error"] == PUBLIC_GENERATION_ERROR
+    assert payload["attempts"] == 1
+    assert payload["max_attempts"] == 1
     assert "Traceback" not in payload["error"]
     assert "/srv/app/path" not in payload["error"]
+
+
+def test_failed_job_retries_before_final_failure(monkeypatch, tmp_path: Path) -> None:
+    settings = Settings(
+        storage_dir=tmp_path / "storage",
+        database_path=tmp_path / "jobs.sqlite3",
+        openai_api_key=None,
+        job_max_attempts=2,
+        job_retry_base_seconds=1,
+    )
+    repository = JobRepository(settings.database_path)
+    repository.init()
+    service = JobService(settings, repository)
+    record = repository.create(
+        job_id="retry-job",
+        template_filename="template.docx",
+        data_filename="data.csv",
+        instructions=None,
+        max_attempts=settings.job_max_attempts,
+    )
+
+    def fail_generation(job_id, settings, repository):
+        raise RuntimeError("transient failure")
+
+    monkeypatch.setattr(jobs, "generate_report_for_job", fail_generation)
+    processed = service.process_next_job()
+
+    assert processed is not None
+    assert processed.job_id == record.job_id
+    assert processed.status == JobStatus.queued
+    assert processed.error == PUBLIC_GENERATION_ERROR
+    assert processed.attempts == 1
+    assert processed.max_attempts == 2
+    assert processed.next_run_at is not None
+    assert processed.locked_by is None
+    assert processed.locked_at is None
 
 
 def test_submit_rejects_invalid_docx_content(tmp_path: Path) -> None:
